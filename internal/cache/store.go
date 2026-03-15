@@ -8,8 +8,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/brandon/mcp-email/internal/config"
-	"github.com/brandon/mcp-email/pkg/types"
+	"github.com/Tillman32/mcp-email/internal/config"
+	"github.com/Tillman32/mcp-email/pkg/types"
 )
 
 // Store provides methods for storing and retrieving data from the cache

@@ -1,9 +1,10 @@
-module github.com/brandon/mcp-email
+module github.com/Tillman32/mcp-email
 
 go 1.23.4
 
 require (
 	github.com/emersion/go-imap v1.2.1
+	github.com/jhillyerd/enmime v1.3.0
 	github.com/sirupsen/logrus v1.9.3
 	modernc.org/sqlite v1.29.0
 )
@@ -16,7 +17,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056 // indirect
-	github.com/jhillyerd/enmime v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect

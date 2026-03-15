@@ -9,7 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/brandon/mcp-email/internal/config"
+	"github.com/Tillman32/mcp-email/internal/config"
 )
 
 // SMTPClient wraps an SMTP client
