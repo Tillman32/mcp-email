@@ -13,7 +13,7 @@ about:
   description: A Model Context Protocol server for handling SMTP/IMAP email operations. Search past emails, send new emails, and manage multiple email accounts.
   icon: https://avatars.githubusercontent.com/u/182288589?s=200&v=4
 source:
-  project: https://github.com/brandon/mcp-email
+  project: https://github.com/Tillman32/mcp-email
   commit: HEAD
 config:
   description: Configure email account connections (IMAP/SMTP)

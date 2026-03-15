@@ -3,9 +3,9 @@ package tools
 import (
 	"github.com/sirupsen/logrus"
 
-	"github.com/brandon/mcp-email/internal/cache"
-	"github.com/brandon/mcp-email/internal/config"
-	"github.com/brandon/mcp-email/internal/email"
+	"github.com/Tillman32/mcp-email/internal/cache"
+	"github.com/Tillman32/mcp-email/internal/config"
+	"github.com/Tillman32/mcp-email/internal/email"
 )
 
 // Registry manages MCP tools

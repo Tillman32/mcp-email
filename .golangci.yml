@@ -30,7 +30,7 @@ linters-settings:
   gofmt:
     simplify: true
   goimports:
-    local-prefixes: github.com/brandon/mcp-email
+    local-prefixes: github.com/Tillman32/mcp-email
   misspell:
     locale: US
   lll:

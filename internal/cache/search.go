@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brandon/mcp-email/pkg/types"
+	"github.com/Tillman32/mcp-email/pkg/types"
 )
 
 // SearchOptions contains search parameters

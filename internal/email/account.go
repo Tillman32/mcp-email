@@ -1,7 +1,7 @@
 package email
 
 import (
-	"github.com/brandon/mcp-email/internal/config"
+	"github.com/Tillman32/mcp-email/internal/config"
 )
 
 // AccountManager manages multiple email accounts
