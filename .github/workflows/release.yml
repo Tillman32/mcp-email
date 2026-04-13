@@ -81,6 +81,7 @@ jobs:
     if: needs.validate-version.outputs.is-increment == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -113,6 +114,7 @@ jobs:
         cache-dependency-path: go.sum
 
     - name: Build binary
+      shell: bash
       env:
         GOOS: ${{ matrix.goos }}
         GOARCH: ${{ matrix.goarch }}
