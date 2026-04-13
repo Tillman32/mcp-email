@@ -284,18 +284,22 @@ jobs:
         build-args: |
           VERSION=${{ needs.validate-version.outputs.version }}
 
-    - name: Check Docker Hub publish prerequisites
-      id: dockerhub-check
+    - name: Detect Docker Hub token availability
+      id: dockerhub-token
       env:
-        DOCKER_HUB_USERNAME: ${{ vars.DOCKER_HUB_USERNAME }}
         DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
       run: |
-        if [ -z "$DOCKER_HUB_USERNAME" ] || [ -z "$DOCKER_HUB_TOKEN" ]; then
-          echo "enabled=false" >> "$GITHUB_OUTPUT"
-          echo "Skipping Docker Hub publish: set vars.DOCKER_HUB_USERNAME and secrets.DOCKER_HUB_TOKEN to enable"
+        if [ -z "$DOCKER_HUB_TOKEN" ]; then
+          echo "available=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
+        echo "available=true" >> "$GITHUB_OUTPUT"
+
+    - name: Check Docker Hub publish prerequisites
+      id: dockerhub-check
+      if: vars.DOCKER_HUB_USERNAME != '' && steps.dockerhub-token.outputs.available == 'true'
+      run: |
         echo "enabled=true" >> "$GITHUB_OUTPUT"
 
     - name: Log in to Docker Hub
@@ -337,23 +341,22 @@ jobs:
         node-version: '20'
         registry-url: 'https://registry.npmjs.org'
 
-    - name: Check npm publish prerequisites
-      id: npm-check
+    - name: Detect npm token availability
+      id: npm-token
       env:
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       run: |
-        if [ ! -f package.json ]; then
-          echo "enabled=false" >> "$GITHUB_OUTPUT"
-          echo "Skipping npm publish: package.json not found"
-          exit 0
-        fi
-
         if [ -z "$NPM_TOKEN" ]; then
-          echo "enabled=false" >> "$GITHUB_OUTPUT"
-          echo "Skipping npm publish: NPM_TOKEN secret is not configured"
+          echo "available=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
+        echo "available=true" >> "$GITHUB_OUTPUT"
+
+    - name: Check npm publish prerequisites
+      id: npm-check
+      if: hashFiles('package.json') != '' && steps.npm-token.outputs.available == 'true'
+      run: |
         echo "enabled=true" >> "$GITHUB_OUTPUT"
 
     - name: Install dependencies
@@ -375,17 +378,21 @@ jobs:
       contents: read
 
     steps:
-    - name: Check Homebrew publish prerequisites
+    - name: Detect Homebrew token availability
+      id: homebrew-token
       env:
-        HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
-        HOMEBREW_FORMULA_PATH: ${{ vars.HOMEBREW_FORMULA_PATH }}
         HOMEBREW_GITHUB_TOKEN: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
       run: |
-        if [ -z "$HOMEBREW_TAP_REPO" ] || [ -z "$HOMEBREW_FORMULA_PATH" ] || [ -z "$HOMEBREW_GITHUB_TOKEN" ]; then
-          echo "Skipping Homebrew publish: set vars.HOMEBREW_TAP_REPO, vars.HOMEBREW_FORMULA_PATH, and secrets.HOMEBREW_GITHUB_TOKEN to enable"
+        if [ -z "$HOMEBREW_GITHUB_TOKEN" ]; then
+          echo "available=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
+        echo "available=true" >> "$GITHUB_OUTPUT"
+
+    - name: Check Homebrew publish prerequisites
+      if: vars.HOMEBREW_TAP_REPO != '' && vars.HOMEBREW_FORMULA_PATH != '' && steps.homebrew-token.outputs.available == 'true'
+      run: |
         echo "Homebrew publish requested, but no formula update automation is configured in this repository yet."
         exit 1
 
@@ -398,21 +405,23 @@ jobs:
       contents: read
 
     steps:
-    - name: Check Chocolatey publish prerequisites
+    - name: Detect Chocolatey API key availability
+      id: choco-token
       shell: pwsh
       env:
         CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
       run: |
-        if (-not (Test-Path .\chocolatey\mcp-email-server.nuspec)) {
-          Write-Host "Skipping Chocolatey publish: chocolatey/mcp-email-server.nuspec not found"
-          exit 0
-        }
-
         if ([string]::IsNullOrWhiteSpace($env:CHOCO_API_KEY)) {
-          Write-Host "Skipping Chocolatey publish: CHOCO_API_KEY secret is not configured"
+          "available=false" >> $env:GITHUB_OUTPUT
           exit 0
         }
 
+        "available=true" >> $env:GITHUB_OUTPUT
+
+    - name: Check Chocolatey publish prerequisites
+      if: hashFiles('chocolatey/mcp-email-server.nuspec') != '' && steps.choco-token.outputs.available == 'true'
+      shell: pwsh
+      run: |
         Write-Host "Chocolatey publish requested, but package/push automation is not configured in this repository yet."
         exit 1
 
