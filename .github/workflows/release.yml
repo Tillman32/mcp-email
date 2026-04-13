@@ -35,8 +35,8 @@ jobs:
         fi
         
         # Validate semantic version format
-        if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-          echo "Error: Version must be in format vX.Y.Z (e.g., v1.0.0)"
+        if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[0-9]+)?)?$'; then
+          echo "Error: Version must be in semantic version format vX.Y.Z or vX.Y.Z-prerelease (e.g., v1.0.0 or v1.0.0-alpha)"
           exit 1
         fi
         
@@ -149,79 +149,9 @@ jobs:
           *.zip
         retention-days: 30
 
-  build-docker:
-    name: Build Docker Image
-    needs: validate-version
-    if: needs.validate-version.outputs.is-increment == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ghcr.io/${{ github.repository }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=semver,pattern={{major}}
-          type=raw,value=latest,enable={{is_default_branch}}
-
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        build-args: |
-          VERSION=${{ needs.validate-version.outputs.version }}
-
-    # Optional: Also push to Docker Hub
-    - name: Log in to Docker Hub
-      if: vars.DOCKER_HUB_USERNAME != '' && secrets.DOCKER_HUB_TOKEN != ''
-      uses: docker/login-action@v3
-      with:
-        username: ${{ vars.DOCKER_HUB_USERNAME }}
-        password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
-    - name: Build and push to Docker Hub
-      if: vars.DOCKER_HUB_USERNAME != '' && secrets.DOCKER_HUB_TOKEN != ''
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: true
-        tags: |
-          ${{ vars.DOCKER_HUB_USERNAME }}/mcp-email-server:${{ needs.validate-version.outputs.version }}
-          ${{ vars.DOCKER_HUB_USERNAME }}/mcp-email-server:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        build-args: |
-          VERSION=${{ needs.validate-version.outputs.version }}
-
   create-release:
     name: Create GitHub Release
-    needs: [validate-version, build-binaries, build-docker]
+    needs: [validate-version, build-binaries]
     if: needs.validate-version.outputs.is-increment == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -301,4 +231,184 @@ jobs:
         prerelease: ${{ contains(needs.validate-version.outputs.version, '-') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-docker:
+    name: Publish Docker Images
+    needs: [validate-version, create-release]
+    if: always() && needs.validate-version.outputs.is-increment == 'true' && needs.create-release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          VERSION=${{ needs.validate-version.outputs.version }}
+
+    - name: Check Docker Hub publish prerequisites
+      id: dockerhub-check
+      env:
+        DOCKER_HUB_USERNAME: ${{ vars.DOCKER_HUB_USERNAME }}
+        DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+      run: |
+        if [ -z "$DOCKER_HUB_USERNAME" ] || [ -z "$DOCKER_HUB_TOKEN" ]; then
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "Skipping Docker Hub publish: set vars.DOCKER_HUB_USERNAME and secrets.DOCKER_HUB_TOKEN to enable"
+          exit 0
+        fi
+
+        echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+    - name: Log in to Docker Hub
+      if: steps.dockerhub-check.outputs.enabled == 'true'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ vars.DOCKER_HUB_USERNAME }}
+        password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+    - name: Build and push to Docker Hub
+      if: steps.dockerhub-check.outputs.enabled == 'true'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ vars.DOCKER_HUB_USERNAME }}/mcp-email-server:${{ needs.validate-version.outputs.version }}
+          ${{ vars.DOCKER_HUB_USERNAME }}/mcp-email-server:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          VERSION=${{ needs.validate-version.outputs.version }}
+
+  publish-npm:
+    name: Publish npm Package
+    needs: [validate-version, create-release]
+    if: always() && needs.validate-version.outputs.is-increment == 'true' && needs.create-release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Check npm publish prerequisites
+      id: npm-check
+      env:
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: |
+        if [ ! -f package.json ]; then
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "Skipping npm publish: package.json not found"
+          exit 0
+        fi
+
+        if [ -z "$NPM_TOKEN" ]; then
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "Skipping npm publish: NPM_TOKEN secret is not configured"
+          exit 0
+        fi
+
+        echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+    - name: Install dependencies
+      if: steps.npm-check.outputs.enabled == 'true'
+      run: npm ci
+
+    - name: Publish to npm
+      if: steps.npm-check.outputs.enabled == 'true'
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: npm publish --access public
+
+  publish-homebrew:
+    name: Publish Homebrew Formula
+    needs: [validate-version, create-release]
+    if: always() && needs.validate-version.outputs.is-increment == 'true' && needs.create-release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Check Homebrew publish prerequisites
+      env:
+        HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+        HOMEBREW_FORMULA_PATH: ${{ vars.HOMEBREW_FORMULA_PATH }}
+        HOMEBREW_GITHUB_TOKEN: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
+      run: |
+        if [ -z "$HOMEBREW_TAP_REPO" ] || [ -z "$HOMEBREW_FORMULA_PATH" ] || [ -z "$HOMEBREW_GITHUB_TOKEN" ]; then
+          echo "Skipping Homebrew publish: set vars.HOMEBREW_TAP_REPO, vars.HOMEBREW_FORMULA_PATH, and secrets.HOMEBREW_GITHUB_TOKEN to enable"
+          exit 0
+        fi
+
+        echo "Homebrew publish requested, but no formula update automation is configured in this repository yet."
+        exit 1
+
+  publish-chocolatey:
+    name: Publish Chocolatey Package
+    needs: [validate-version, create-release]
+    if: always() && needs.validate-version.outputs.is-increment == 'true' && needs.create-release.result == 'success'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Check Chocolatey publish prerequisites
+      shell: pwsh
+      env:
+        CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+      run: |
+        if (-not (Test-Path .\chocolatey\mcp-email-server.nuspec)) {
+          Write-Host "Skipping Chocolatey publish: chocolatey/mcp-email-server.nuspec not found"
+          exit 0
+        }
+
+        if ([string]::IsNullOrWhiteSpace($env:CHOCO_API_KEY)) {
+          Write-Host "Skipping Chocolatey publish: CHOCO_API_KEY secret is not configured"
+          exit 0
+        }
+
+        Write-Host "Chocolatey publish requested, but package/push automation is not configured in this repository yet."
+        exit 1
 
