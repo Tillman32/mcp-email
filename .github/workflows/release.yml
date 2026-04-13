@@ -127,19 +127,21 @@ jobs:
         fi
         go build -ldflags "-X main.version=${VERSION}" -trimpath -o "${OUTPUT_NAME}" ./cmd/server
 
-    - name: Create archive
+    - name: Create archive (Unix)
+      if: matrix.goos != 'windows'
       shell: bash
       run: |
         OUTPUT_NAME="mcp-email-server"
-        ARCHIVE_NAME="mcp-email-server-${{ matrix.goos }}-${{ matrix.goarch }}"
-        if [ "${{ matrix.goos }}" == "windows" ]; then
-          OUTPUT_NAME="${OUTPUT_NAME}.exe"
-          ARCHIVE_NAME="${ARCHIVE_NAME}.zip"
-          zip "${ARCHIVE_NAME}" "${OUTPUT_NAME}"
-        else
-          ARCHIVE_NAME="${ARCHIVE_NAME}.tar.gz"
-          tar -czf "${ARCHIVE_NAME}" "${OUTPUT_NAME}"
-        fi
+        ARCHIVE_NAME="mcp-email-server-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+        tar -czf "${ARCHIVE_NAME}" "${OUTPUT_NAME}"
+
+    - name: Create archive (Windows)
+      if: matrix.goos == 'windows'
+      shell: pwsh
+      run: |
+        $outputName = "mcp-email-server.exe"
+        $archiveName = "mcp-email-server-${{ matrix.goos }}-${{ matrix.goarch }}.zip"
+        Compress-Archive -Path $outputName -DestinationPath $archiveName -Force
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
