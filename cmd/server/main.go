@@ -31,7 +31,7 @@ func main() {
 	// Set up logging
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.JSONFormatter{})
-	logger.SetOutput(os.Stdout)
+	logger.SetOutput(os.Stderr)
 
 	// Load configuration
 	cfg, err := config.LoadConfig()

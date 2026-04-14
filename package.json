@@ -1,0 +1,31 @@
+{
+  "name": "mcp-email",
+  "version": "0.1.0",
+  "description": "A Model Context Protocol (MCP) server for handling SMTP/IMAP email operations. This server allows you to search past emails, send new emails, and manage multiple email accounts.",
+  "keywords": [
+    "mcp",
+    "email"
+  ],
+  "homepage": "https://github.com/Tillman32/mcp-email#readme",
+  "bugs": {
+    "url": "https://github.com/Tillman32/mcp-email/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tillman32/mcp-email.git"
+  },
+  "license": "MIT",
+  "author": "brandontillman.com",
+  "type": "commonjs",
+  "main": "index.js",
+  "devDependencies": {
+    "dotenv-cli": "^8.0.0"
+  },
+  "scripts": {
+    "build": "go mod download && go build -ldflags \"-X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)\" -o bin/mcp-email-server ./cmd/server",
+    "build:docker": "docker build -t mcp-email-server .",
+    "dev": "go run ./cmd/server",
+    "dev:docker": "docker run -p 8080:8080 mcp-email-server",
+    "test": "dotenv -e .env -- npx @modelcontextprotocol/inspector ./bin/mcp-email-server"
+  }
+}

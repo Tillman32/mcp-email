@@ -52,5 +52,8 @@ bin/
 # MCP config (user-specific)
 mcp.json
 
+# Node modules (if using any Node.js tools)
+node_modules/
+
 server.log
 server.pid
