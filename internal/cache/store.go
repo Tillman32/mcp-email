@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -279,6 +280,154 @@ func (s *Store) HasEmails(accountID int) (bool, error) {
 		return false, fmt.Errorf("failed to check emails count: %w", err)
 	}
 	return count > 0, nil
+}
+
+// UnsubscribeResult holds the parsed unsubscribe data for one email.
+type UnsubscribeResult struct {
+	ListUnsubscribe []string         `json:"list_unsubscribe"`
+	BodyLinks       []UnsubscribeLink `json:"body_links"`
+	OneClick        *OneClickPost    `json:"one_click,omitempty"`
+}
+
+// UnsubscribeLink is a candidate link found in the email body.
+type UnsubscribeLink struct {
+	Text       string  `json:"text"`
+	URL        string  `json:"url"`
+	Confidence float64 `json:"confidence"`
+}
+
+// OneClickPost holds RFC 8058 one-click POST data.
+type OneClickPost struct {
+	URL      string `json:"url"`
+	PostBody string `json:"post_body"`
+}
+
+// GetUnsubscribeLinks returns cached unsubscribe data for an email, or nil if not cached.
+func (s *Store) GetUnsubscribeLinks(emailID int64) (*UnsubscribeResult, error) {
+	var listJSON, bodyJSON, oneClickJSON sql.NullString
+	err := s.cache.DB().QueryRow(
+		`SELECT list_unsubscribe, body_links, one_click FROM unsubscribe_links WHERE email_id = ?`,
+		emailID,
+	).Scan(&listJSON, &bodyJSON, &oneClickJSON)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get unsubscribe links: %w", err)
+	}
+
+	result := &UnsubscribeResult{}
+	if listJSON.Valid {
+		if err := json.Unmarshal([]byte(listJSON.String), &result.ListUnsubscribe); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal list_unsubscribe: %w", err)
+		}
+	}
+	if bodyJSON.Valid {
+		if err := json.Unmarshal([]byte(bodyJSON.String), &result.BodyLinks); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal body_links: %w", err)
+		}
+	}
+	if oneClickJSON.Valid && oneClickJSON.String != "null" {
+		result.OneClick = &OneClickPost{}
+		if err := json.Unmarshal([]byte(oneClickJSON.String), result.OneClick); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal one_click: %w", err)
+		}
+	}
+	return result, nil
+}
+
+// UpsertUnsubscribeLinks caches unsubscribe data for an email.
+func (s *Store) UpsertUnsubscribeLinks(emailID int64, result *UnsubscribeResult) error {
+	listJSON, err := json.Marshal(result.ListUnsubscribe)
+	if err != nil {
+		return fmt.Errorf("failed to marshal list_unsubscribe: %w", err)
+	}
+	bodyJSON, err := json.Marshal(result.BodyLinks)
+	if err != nil {
+		return fmt.Errorf("failed to marshal body_links: %w", err)
+	}
+	oneClickJSON, err := json.Marshal(result.OneClick)
+	if err != nil {
+		return fmt.Errorf("failed to marshal one_click: %w", err)
+	}
+
+	_, err = s.cache.DB().Exec(`
+		INSERT INTO unsubscribe_links (email_id, list_unsubscribe, body_links, one_click, cached_at)
+		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(email_id) DO UPDATE SET
+			list_unsubscribe = excluded.list_unsubscribe,
+			body_links       = excluded.body_links,
+			one_click        = excluded.one_click,
+			cached_at        = CURRENT_TIMESTAMP
+	`, emailID, string(listJSON), string(bodyJSON), string(oneClickJSON))
+	if err != nil {
+		return fmt.Errorf("failed to upsert unsubscribe links: %w", err)
+	}
+	return nil
+}
+
+// SenderStats holds aggregate information about a single sender.
+type SenderStats struct {
+	SenderEmail string   `json:"sender_email"`
+	SenderDomain string  `json:"sender_domain"`
+	TotalEmails int      `json:"total_emails"`
+	OldestDate  string   `json:"oldest_date"`
+	NewestDate  string   `json:"newest_date"`
+	Folders     []string `json:"folders"`
+}
+
+// GetSenderStats returns aggregate stats for a sender from the email cache.
+func (s *Store) GetSenderStats(senderEmail string) (*SenderStats, error) {
+	row := s.cache.DB().QueryRow(`
+		SELECT
+			e.sender_email,
+			COUNT(*)                        AS total,
+			MIN(e.date)                     AS oldest,
+			MAX(e.date)                     AS newest
+		FROM emails e
+		WHERE LOWER(e.sender_email) = LOWER(?)
+		GROUP BY LOWER(e.sender_email)
+	`, senderEmail)
+
+	stats := &SenderStats{}
+	var oldest, newest string
+	if err := row.Scan(&stats.SenderEmail, &stats.TotalEmails, &oldest, &newest); err != nil {
+		return nil, fmt.Errorf("sender not found in cache: %s", senderEmail)
+	}
+
+	stats.OldestDate = oldest
+	stats.NewestDate = newest
+
+	// Derive domain from sender address.
+	if idx := strings.LastIndex(stats.SenderEmail, "@"); idx >= 0 {
+		stats.SenderDomain = stats.SenderEmail[idx+1:]
+	}
+
+	// Collect distinct folders.
+	rows, err := s.cache.DB().Query(`
+		SELECT DISTINCT f.path
+		FROM emails e
+		JOIN folders f ON e.folder_id = f.id
+		WHERE LOWER(e.sender_email) = LOWER(?)
+		ORDER BY f.path
+	`, senderEmail)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sender folders: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("failed to scan folder path: %w", err)
+		}
+		stats.Folders = append(stats.Folders, path)
+	}
+	if stats.Folders == nil {
+		stats.Folders = []string{}
+	}
+
+	return stats, nil
 }
 
 // HasAnyEmails checks if there are any cached emails

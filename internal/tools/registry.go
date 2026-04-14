@@ -49,6 +49,9 @@ func (r *Registry) registerTools() {
 		NewSearchEmailsTool(r.config, r.emailManager, r.cacheStore, r.logger),
 		NewGetEmailTool(r.config, r.emailManager, r.cacheStore, r.logger),
 		NewSendEmailTool(r.config, r.emailManager, r.cacheStore, r.logger),
+		NewFindUnsubscribeLinkTool(r.config, r.emailManager, r.cacheStore, r.logger),
+		NewGetSenderStatsTool(r.config, r.emailManager, r.cacheStore, r.logger),
+		NewExecuteUnsubscribeTool(r.config, r.emailManager, r.cacheStore, r.logger),
 	}
 
 	for _, tool := range toolList {

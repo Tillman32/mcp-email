@@ -86,4 +86,14 @@ END;
 CREATE TRIGGER IF NOT EXISTS emails_fts_delete AFTER DELETE ON emails BEGIN
     DELETE FROM emails_fts WHERE rowid = old.id;
 END;
+
+-- Unsubscribe link cache
+CREATE TABLE IF NOT EXISTS unsubscribe_links (
+    email_id INTEGER PRIMARY KEY,
+    list_unsubscribe TEXT,
+    body_links      TEXT,
+    one_click       TEXT,
+    cached_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+);
 `
