@@ -49,6 +49,11 @@ func (r *Registry) registerTools() {
 		NewSearchEmailsTool(r.config, r.emailManager, r.cacheStore, r.logger),
 		NewGetEmailTool(r.config, r.emailManager, r.cacheStore, r.logger),
 		NewSendEmailTool(r.config, r.emailManager, r.cacheStore, r.logger),
+		NewCreateDraftTool(r.config, r.emailManager, r.cacheStore, r.logger),
+		NewListDraftsTool(r.config, r.emailManager, r.cacheStore, r.logger),
+		NewGetDraftTool(r.config, r.emailManager, r.cacheStore, r.logger),
+		NewSendDraftTool(r.config, r.emailManager, r.cacheStore, r.logger),
+		NewDeleteDraftTool(r.config, r.emailManager, r.cacheStore, r.logger),
 	}
 
 	for _, tool := range toolList {

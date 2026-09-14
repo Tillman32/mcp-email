@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tillman32/mcp-email/internal/cache"
 	"github.com/Tillman32/mcp-email/internal/config"
+	"github.com/Tillman32/mcp-email/pkg/types"
 )
 
 // Manager manages email operations
@@ -131,6 +132,121 @@ func (m *Manager) SendEmail(accountName string, msg *EmailMessage) error {
 
 	if err := account.SMTP.Send(msg); err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
+	}
+
+	return nil
+}
+
+// CreateDraft builds a raw message and stores it in the drafts folder via IMAP
+// APPEND, flagged \Draft so it appears in the email client's Drafts folder.
+func (m *Manager) CreateDraft(accountName, folder string, msg *EmailMessage) error {
+	account, err := m.accountManager.GetAccount(accountName)
+	if err != nil {
+		return fmt.Errorf("account not found: %s", accountName)
+	}
+	if account == nil {
+		return fmt.Errorf("account not found: %s", accountName)
+	}
+
+	raw := account.SMTP.BuildMessage(msg)
+	if err := account.IMAP.SaveDraft(folder, raw); err != nil {
+		return fmt.Errorf("failed to save draft: %w", err)
+	}
+
+	return nil
+}
+
+// ListDrafts returns all drafts from the given folder.
+func (m *Manager) ListDrafts(accountName, folder string) ([]*types.Email, error) {
+	account, err := m.accountManager.GetAccount(accountName)
+	if err != nil {
+		return nil, fmt.Errorf("account not found: %s", accountName)
+	}
+	if account == nil {
+		return nil, fmt.Errorf("account not found: %s", accountName)
+	}
+
+	drafts, err := account.IMAP.FetchDrafts(folder)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list drafts: %w", err)
+	}
+
+	return drafts, nil
+}
+
+// GetDraft returns a single draft by UID from the given folder.
+func (m *Manager) GetDraft(accountName, folder string, uid uint32) (*types.Email, error) {
+	account, err := m.accountManager.GetAccount(accountName)
+	if err != nil {
+		return nil, fmt.Errorf("account not found: %s", accountName)
+	}
+	if account == nil {
+		return nil, fmt.Errorf("account not found: %s", accountName)
+	}
+
+	draft, err := account.IMAP.FetchEmailByUID(folder, uid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get draft: %w", err)
+	}
+
+	return draft, nil
+}
+
+// SendDraft sends a stored draft over SMTP and, by default, deletes it from the
+// drafts folder once sent.
+func (m *Manager) SendDraft(accountName, folder string, uid uint32, deleteAfterSend bool) error {
+	account, err := m.accountManager.GetAccount(accountName)
+	if err != nil {
+		return fmt.Errorf("account not found: %s", accountName)
+	}
+	if account == nil {
+		return fmt.Errorf("account not found: %s", accountName)
+	}
+
+	draft, err := account.IMAP.FetchEmailByUID(folder, uid)
+	if err != nil {
+		return fmt.Errorf("failed to get draft: %w", err)
+	}
+
+	// Rebuild a sendable message from the fetched draft. Recipients are
+	// restored from the draft's merged recipient list.
+	msg := &EmailMessage{
+		To:       draft.Recipients,
+		Subject:  draft.Subject,
+		BodyText: draft.BodyText,
+		BodyHTML: draft.BodyHTML,
+	}
+
+	if err := account.SMTP.Send(msg); err != nil {
+		return fmt.Errorf("failed to send draft: %w", err)
+	}
+
+	if deleteAfterSend {
+		if err := account.IMAP.DeleteEmailByUID(folder, uid); err != nil {
+			return fmt.Errorf("draft sent but failed to delete it: %w", err)
+		}
+	}
+
+	m.logger.WithFields(logrus.Fields{
+		"account": accountName,
+		"folder":  folder,
+		"uid":     uid,
+	}).Info("Sent draft")
+	return nil
+}
+
+// DeleteDraft removes a draft from the drafts folder by UID.
+func (m *Manager) DeleteDraft(accountName, folder string, uid uint32) error {
+	account, err := m.accountManager.GetAccount(accountName)
+	if err != nil {
+		return fmt.Errorf("account not found: %s", accountName)
+	}
+	if account == nil {
+		return fmt.Errorf("account not found: %s", accountName)
+	}
+
+	if err := account.IMAP.DeleteEmailByUID(folder, uid); err != nil {
+		return fmt.Errorf("failed to delete draft: %w", err)
 	}
 
 	return nil

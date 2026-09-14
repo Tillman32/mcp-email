@@ -39,10 +39,6 @@ linters-settings:
     threshold: 100
   gocyclo:
     min-complexity: 15
-  maligned:
-    suggest-new: true
-  unconvert:
-    suggestions: true
   unparam:
     check-exported: false
   nakedret:

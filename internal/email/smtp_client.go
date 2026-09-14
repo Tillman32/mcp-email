@@ -50,7 +50,6 @@ func NewSMTPClient(cfg *config.AccountConfig) (*SMTPClient, error) {
 func (c *SMTPClient) Send(msg *EmailMessage) error {
 	// Create message
 	emailBytes := c.createMessage(msg)
-
 	// Connect to server
 	addr := fmt.Sprintf("%s:%d", c.config.SMTPHost, c.config.SMTPPort)
 
@@ -198,6 +197,13 @@ func (c *SMTPClient) createMessage(msg *EmailMessage) []byte {
 	}
 
 	return buf.Bytes()
+}
+
+// BuildMessage returns the raw RFC 2822 message bytes for a message without
+// sending it. This is used to build draft messages that are stored via IMAP
+// APPEND before the user is ready to send.
+func (c *SMTPClient) BuildMessage(msg *EmailMessage) []byte {
+	return c.createMessage(msg)
 }
 
 // SetLogger sets the logger for the client

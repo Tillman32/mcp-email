@@ -1,11 +1,12 @@
 # MCP Email Server
 
-A Model Context Protocol (MCP) server for handling SMTP/IMAP email operations. This server allows you to search past emails, send new emails, and manage multiple email accounts.
+A Model Context Protocol (MCP) server for handling SMTP/IMAP email operations. This server allows you to search past emails, send new emails, manage multiple email accounts, and work with drafts directly in your email client.
 
 ## Features
 
 - **Search Emails**: Flexible search across all email fields (sender, recipient, subject, body, date range)
 - **Send Emails**: Send emails with support for text, HTML, attachments, CC, and BCC
+- **Draft Support**: Create, read, send, and delete drafts that appear in your email client's Drafts folder
 - **Multi-Account Support**: Manage multiple email accounts simultaneously
 - **Local Caching**: SQLite-based cache for fast email searches
 - **Full-Text Search**: Fast full-text search using SQLite FTS5
@@ -130,13 +131,85 @@ Send a new email with support for text, HTML, attachments, CC, BCC.
 - `reply_to` (optional): Reply-To header
 - `in_reply_to` (optional): In-Reply-To header (for replies)
 
+### `create_draft`
+Create a draft email and store it in the email client's Drafts folder. The draft appears in your email client (Gmail, Outlook, etc.) exactly as if you had composed it there — it is **not** sent.
+
+**Parameters:**
+- `account_name` (required): Account to create the draft in
+- `folder` (optional): Drafts folder name (default: `Drafts`; Gmail uses `[Gmail]/Drafts`)
+- `to` (optional): Recipient email address(es) (comma-separated)
+- `cc` (optional): CC recipients (comma-separated)
+- `bcc` (optional): BCC recipients (comma-separated)
+- `subject` (optional): Email subject
+- `body_text` (optional): Plain text body
+- `body_html` (optional): HTML body
+- `reply_to` (optional): Reply-To header
+- `in_reply_to` (optional): In-Reply-To header (for replies)
+
+*Requires at least one of `subject`, `body_text`, or `body_html`.*
+
+### `list_drafts`
+List drafts stored in the email client's Drafts folder. Returns each draft's UID (used to send/delete it), subject, recipients, and a body snippet.
+
+**Parameters:**
+- `account_name` (required): Account to list drafts from
+- `folder` (optional): Drafts folder name (default: `Drafts`; Gmail uses `[Gmail]/Drafts`)
+
+### `get_draft`
+Retrieve the full contents of a single draft by UID (from `list_drafts`), including the full plain-text and HTML body.
+
+**Parameters:**
+- `account_name` (required): Account the draft belongs to
+- `uid` (required): Draft UID (from `list_drafts`)
+- `folder` (optional): Drafts folder name (default: `Drafts`)
+
+### `send_draft`
+Send an existing draft by UID and, by default, delete it from the Drafts folder afterward. This is how a user asks an agent to "send that draft I saved".
+
+**Parameters:**
+- `account_name` (required): Account to send the draft from
+- `uid` (required): Draft UID (from `list_drafts`)
+- `folder` (optional): Drafts folder name (default: `Drafts`)
+- `delete_after_send` (optional): Delete the draft from the Drafts folder after sending (default: `true`)
+
+### `delete_draft`
+Permanently delete a draft by UID from the email client's Drafts folder.
+
+**Parameters:**
+- `account_name` (required): Account the draft belongs to
+- `uid` (required): Draft UID (from `list_drafts`)
+- `folder` (optional): Drafts folder name (default: `Drafts`)
+
+> **Note:** The default drafts folder is `Drafts`. Gmail stores drafts in `[Gmail]/Drafts` — pass `folder` accordingly, or run `list_folders` to discover the correct folder name for your provider.
+
 ## Building
 
-### Local Build
+### Prerequisites
+
+- **Go 1.23 or higher** — required to compile the server from source. Install with your package manager (`apt install golang-go`, `brew install go`, etc.), or from https://go.dev/dl.
+- An email account with IMAP/SMTP access (app passwords recommended).
+
+### Build from Source
 
 ```bash
+# Clone the repository
+git clone https://github.com/Tillman32/mcp-email.git
+cd mcp-email
+
+# Download dependencies
 go mod download
+
+# Build the server binary
 go build -o mcp-email-server ./cmd/server
+
+# Verify it built
+./mcp-email-server --version
+```
+
+The resulting `mcp-email-server` binary is self-contained — you can copy it to `/usr/local/bin/` and reference it from your MCP config:
+
+```bash
+sudo cp mcp-email-server /usr/local/bin/
 ```
 
 ### Docker Build
@@ -350,6 +423,78 @@ This approach keeps your credentials in a separate `.env` file (which should not
 - Never commit your actual `mcp.json` with real passwords to version control
 - Use app passwords instead of your regular email password
 - Consider using environment variables or secrets management for production
+
+## Using with Hermes Agent
+
+[Hermes Agent](https://hermes-agent.nousresearch.com) has a built-in MCP client that discovers a server's tools at startup and exposes them as first-class tools (prefixed `mcp_email_*`) the agent can call in any conversation.
+
+### 1. Install Go and build the binary
+
+Hermes host machines need Go 1.23+ to compile the server. Build and install the binary:
+
+```bash
+# Build (see "Building" above for details)
+git clone https://github.com/Tillman32/mcp-email.git
+cd mcp-email
+go mod download
+go build -o mcp-email-server ./cmd/server
+
+# Install somewhere on PATH
+sudo cp mcp-email-server /usr/local/bin/
+```
+
+### 2. Add the server to Hermes config
+
+Edit `~/.hermes/config.yaml` and add an entry under `mcp_servers`. Point `command` at the installed binary and provide your account credentials via `env` (use **app passwords**, not your real email password):
+
+```yaml
+mcp_servers:
+  email:
+    command: "/usr/local/bin/mcp-email-server"
+    env:
+      IMAP_HOST: "imap.gmail.com"
+      IMAP_PORT: "993"
+      IMAP_USERNAME: "you@gmail.com"
+      IMAP_PASSWORD: "your-app-password"
+      SMTP_HOST: "smtp.gmail.com"
+      SMTP_PORT: "587"
+      SMTP_USERNAME: "you@gmail.com"
+      SMTP_PASSWORD: "your-app-password"
+      CACHE_PATH: "/var/lib/mcp-email/email_cache.db"
+      SEARCH_RESULT_LIMIT: "100"
+      LOG_LEVEL: "info"
+```
+
+**Security:** Hermes only passes environment variables you explicitly list under `env` to the subprocess — it does not leak your shell environment. Store secrets as normal YAML values here, or reference your secret manager. Never commit your real `config.yaml`.
+
+### 3. Restart Hermes and verify
+
+```bash
+hermes mcp list          # should list the email server
+hermes mcp test email    # test the connection
+```
+
+Then start a new session (`/new` or relaunch). On startup Hermes connects to the server and registers its tools with the `mcp_email_` prefix. Verify with:
+
+```bash
+hermes tools list | grep mcp_email
+```
+
+You should see: `mcp_email_create_draft`, `mcp_email_list_drafts`, `mcp_email_get_draft`, `mcp_email_send_draft`, `mcp_email_delete_draft`, `mcp_email_search_emails`, `mcp_email_send_email`, `mcp_email_list_folders`, and `mcp_email_get_email`.
+
+### 4. Use it in conversation
+
+Once connected, you can just ask Hermes to work with your email:
+
+- "Create a draft to Sarah about the project update, subject 'Status update', saying the build passed."
+- "What drafts do I have saved?"
+- "Send the draft about the project update."
+- "Delete the draft titled 'meeting notes'."
+- "Search my inbox for invoices from last month."
+
+### Multi-account configuration
+
+For multiple accounts, use the `ACCOUNT_N_*` environment variables in the same `env` block (see [Multiple Accounts Configuration](#multiple-accounts-configuration)) and pass the relevant `account_name` to each tool call.
 
 ## Development
 
