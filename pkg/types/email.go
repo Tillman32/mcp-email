@@ -2,6 +2,14 @@ package types
 
 import "time"
 
+// EmailAttachment describes a file attached to an email. Only metadata is
+// surfaced (never content); use create/send tools to add files.
+type EmailAttachment struct {
+	Filename string `json:"filename"`
+	MimeType string `json:"mime_type"`
+	Size     int    `json:"size"`
+}
+
 // Email represents an email message
 type Email struct {
 	ID          int64             `json:"id"`
@@ -18,6 +26,7 @@ type Email struct {
 	Date        time.Time         `json:"date"`
 	BodyText    string            `json:"body_text,omitempty"`
 	BodyHTML    string            `json:"body_html,omitempty"`
+	Attachments []EmailAttachment `json:"attachments,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
 	Flags       []string          `json:"flags,omitempty"`
 	CachedAt    time.Time         `json:"cached_at"`

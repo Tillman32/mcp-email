@@ -105,6 +105,7 @@ func (t *GetEmailTool) Execute(params map[string]interface{}) (interface{}, erro
 					cachedEmail.BodyText = emails[0].BodyText
 					cachedEmail.BodyHTML = emails[0].BodyHTML
 					cachedEmail.Headers = emails[0].Headers
+					cachedEmail.Attachments = emails[0].Attachments
 
 					// Update cache using UpsertEmail
 					if err := t.cacheStore.UpsertEmail(cachedEmail); err != nil {
@@ -133,6 +134,7 @@ func (t *GetEmailTool) Execute(params map[string]interface{}) (interface{}, erro
 		"date":         cachedEmail.Date.Format(time.RFC3339),
 		"body_text":    cachedEmail.BodyText,
 		"body_html":    cachedEmail.BodyHTML,
+		"attachments":  cachedEmail.Attachments,
 		"headers":      cachedEmail.Headers,
 		"flags":        cachedEmail.Flags,
 		"cached_at":    cachedEmail.CachedAt.Format(time.RFC3339),

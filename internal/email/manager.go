@@ -208,16 +208,14 @@ func (m *Manager) SendDraft(accountName, folder string, uid uint32, deleteAfterS
 		return fmt.Errorf("failed to get draft: %w", err)
 	}
 
-	// Rebuild a sendable message from the fetched draft. Recipients are
-	// restored from the draft's merged recipient list.
-	msg := &EmailMessage{
-		To:       draft.Recipients,
-		Subject:  draft.Subject,
-		BodyText: draft.BodyText,
-		BodyHTML: draft.BodyHTML,
+	// Resend the stored bytes as-is so attachments survive the round trip.
+	// Rebuilding from parsed fields would silently drop them.
+	raw, err := account.IMAP.FetchRawMessage(folder, uid)
+	if err != nil {
+		return fmt.Errorf("failed to fetch draft content: %w", err)
 	}
 
-	if err := account.SMTP.Send(msg); err != nil {
+	if err := account.SMTP.SendRaw(draft.Recipients, raw); err != nil {
 		return fmt.Errorf("failed to send draft: %w", err)
 	}
 

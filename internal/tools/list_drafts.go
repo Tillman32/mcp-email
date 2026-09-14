@@ -81,13 +81,15 @@ func (t *ListDraftsTool) Execute(params map[string]interface{}) (interface{}, er
 			snippet = snippet[:200]
 		}
 		result[i] = map[string]interface{}{
-			"uid":          draft.UID,
-			"subject":      draft.Subject,
-			"recipients":   draft.Recipients,
-			"sender_name":  draft.SenderName,
-			"sender_email": draft.SenderEmail,
-			"date":         draft.Date.Format(time.RFC3339),
-			"snippet":      snippet,
+			"uid":              draft.UID,
+			"subject":          draft.Subject,
+			"recipients":       draft.Recipients,
+			"sender_name":      draft.SenderName,
+			"sender_email":     draft.SenderEmail,
+			"date":             draft.Date.Format(time.RFC3339),
+			"snippet":          snippet,
+			"attachment_count": len(draft.Attachments),
+			"attachments":      draft.Attachments,
 		}
 	}
 

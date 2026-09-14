@@ -207,63 +207,74 @@ func (c *IMAPClient) parseMessage(msg *imap.Message, folderName string) *types.E
 	email.Flags = append(email.Flags, msg.Flags...)
 
 	// Parse body using RFC822 content with enmime
-	if msg.Body != nil {
-		c.logger.WithField("body_keys", getBodyKeys(msg.Body)).WithField("body_type", fmt.Sprintf("%T", msg.Body)).Debug("Body info")
+	bodyBytes := c.messageBytes(msg)
 
-		// Try multiple ways to access the body content
-		var bodyBytes []byte
-
-		// Method 1: Try nil key (RFC822)
-		if literal, ok := msg.Body[nil]; ok {
-			c.logger.Debug("Found nil key, reading RFC822 content")
-			bodyBytes = c.readLiteralToBytes(literal)
-		} else {
-			// Method 2: Try empty BodySectionName
-			emptySection := &imap.BodySectionName{}
-			if literal, ok := msg.Body[emptySection]; ok {
-				c.logger.Debug("Found empty section, reading content")
-				bodyBytes = c.readLiteralToBytes(literal)
-			} else {
-				// Method 3: Try any available section
-				for section, literal := range msg.Body {
-					c.logger.WithField("trying_section", fmt.Sprintf("%v", section)).Debug("Trying available section")
-					bodyBytes = c.readLiteralToBytes(literal)
-					if len(bodyBytes) > 0 {
-						break
-					}
-				}
-			}
+	if len(bodyBytes) > 0 {
+		c.logger.WithField("body_size", len(bodyBytes)).Debug("Body bytes read")
+		if len(bodyBytes) > 0 {
+			c.logger.WithField("body_preview", string(bodyBytes[:min(200, len(bodyBytes))])).Debug("Body preview")
 		}
 
-		if len(bodyBytes) > 0 {
-			c.logger.WithField("body_size", len(bodyBytes)).Debug("Body bytes read")
-			if len(bodyBytes) > 0 {
-				c.logger.WithField("body_preview", string(bodyBytes[:min(200, len(bodyBytes))])).Debug("Body preview")
+		// Try to parse with enmime
+		env, err := enmime.ReadEnvelope(bytes.NewReader(bodyBytes))
+		if err == nil {
+			email.BodyText = env.Text
+			email.BodyHTML = env.HTML
+			for _, part := range env.Attachments {
+				email.Attachments = append(email.Attachments, types.EmailAttachment{
+					Filename: part.FileName,
+					MimeType: part.ContentType,
+					Size:     len(part.Content),
+				})
 			}
-
-			// Try to parse with enmime
-			env, err := enmime.ReadEnvelope(bytes.NewReader(bodyBytes))
-			if err == nil {
-				email.BodyText = env.Text
-				email.BodyHTML = env.HTML
-				c.logger.WithFields(logrus.Fields{
-					"text_len": len(env.Text),
-					"html_len": len(env.HTML),
-				}).Debug("Successfully parsed with enmime")
-			} else {
-				// Fallback: try to extract text directly
-				bodyStr := string(bodyBytes)
-				email.BodyText = bodyStr
-				c.logger.WithError(err).Debug("Failed to parse with enmime, using raw body")
-			}
+			c.logger.WithFields(logrus.Fields{
+				"text_len":       len(env.Text),
+				"html_len":       len(env.HTML),
+				"attachment_len": len(env.Attachments),
+			}).Debug("Successfully parsed with enmime")
 		} else {
-			c.logger.Error("No body content found")
+			// Fallback: try to extract text directly
+			bodyStr := string(bodyBytes)
+			email.BodyText = bodyStr
+			c.logger.WithError(err).Debug("Failed to parse with enmime, using raw body")
 		}
 	} else {
-		c.logger.Error("Message body is nil")
+		c.logger.Error("No body content found")
 	}
 
 	return email
+}
+
+// messageBytes extracts the raw RFC822 bytes from a fetched IMAP message,
+// trying the known body-section key shapes go-imap produces.
+func (c *IMAPClient) messageBytes(msg *imap.Message) []byte {
+	if msg.Body == nil {
+		c.logger.Error("Message body is nil")
+		return nil
+	}
+	c.logger.WithField("body_keys", getBodyKeys(msg.Body)).WithField("body_type", fmt.Sprintf("%T", msg.Body)).Debug("Body info")
+
+	// Method 1: Try nil key (RFC822)
+	if literal, ok := msg.Body[nil]; ok {
+		c.logger.Debug("Found nil key, reading RFC822 content")
+		return c.readLiteralToBytes(literal)
+	}
+
+	// Method 2: Try empty BodySectionName
+	emptySection := &imap.BodySectionName{}
+	if literal, ok := msg.Body[emptySection]; ok {
+		c.logger.Debug("Found empty section, reading content")
+		return c.readLiteralToBytes(literal)
+	}
+
+	// Method 3: Try any available section
+	for section, literal := range msg.Body {
+		c.logger.WithField("trying_section", fmt.Sprintf("%v", section)).Debug("Trying available section")
+		if bodyBytes := c.readLiteralToBytes(literal); len(bodyBytes) > 0 {
+			return bodyBytes
+		}
+	}
+	return nil
 }
 
 // SearchEmails searches for emails in a folder
@@ -435,7 +446,49 @@ func (c *IMAPClient) FetchEmailByUID(folder string, uid uint32) (*types.Email, e
 	return nil, fmt.Errorf("draft with UID %d not found in %s", uid, folder)
 }
 
-// DeleteEmailByUID marks a message as \Deleted and expunges it, permanently
+// FetchRawMessage fetches the raw RFC822 bytes of a single message by UID.
+// It is used to resend drafts byte-for-byte (attachments included) without
+// rebuilding the message.
+func (c *IMAPClient) FetchRawMessage(folder string, uid uint32) ([]byte, error) {
+	if err := c.Connect(); err != nil {
+		return nil, err
+	}
+
+	if _, err := c.client.Select(folder, false); err != nil {
+		return nil, fmt.Errorf("failed to select folder %s: %w", folder, err)
+	}
+
+	seqSet := new(imap.SeqSet)
+	seqSet.AddNum(uid)
+
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchRFC822}
+	messages := make(chan *imap.Message, 10)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.client.UidFetch(seqSet, items, messages)
+	}()
+
+	for msg := range messages {
+		if msg.Uid == uid {
+			raw := c.messageBytes(msg)
+			if err := <-done; err != nil {
+				return nil, fmt.Errorf("failed to fetch raw message: %w", err)
+			}
+			if len(raw) == 0 {
+				return nil, fmt.Errorf("draft with UID %d in %s has no content", uid, folder)
+			}
+			return raw, nil
+		}
+	}
+
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("failed to fetch raw message: %w", err)
+	}
+	return nil, fmt.Errorf("draft with UID %d not found in %s", uid, folder)
+}
+
+// DeleteEmailByUID marks a message as \\Deleted and expunges it, permanently
 // removing it from the folder.
 func (c *IMAPClient) DeleteEmailByUID(folder string, uid uint32) error {
 	if err := c.Connect(); err != nil {
