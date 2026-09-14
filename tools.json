@@ -132,6 +132,146 @@
         "desc": "Optional: In-Reply-To header (for replies)"
       }
     ]
+  },
+  {
+    "name": "create_draft",
+    "description": "Create a draft email in the email client's Drafts folder (not sent)",
+    "arguments": [
+      {
+        "name": "account_name",
+        "type": "string",
+        "desc": "Account to create the draft in"
+      },
+      {
+        "name": "folder",
+        "type": "string",
+        "desc": "Optional: Drafts folder name (default: 'Drafts'; Gmail uses '[Gmail]/Drafts')"
+      },
+      {
+        "name": "to",
+        "type": "string",
+        "desc": "Optional: Recipient email address(es) (comma-separated)"
+      },
+      {
+        "name": "cc",
+        "type": "string",
+        "desc": "Optional: CC recipients (comma-separated)"
+      },
+      {
+        "name": "bcc",
+        "type": "string",
+        "desc": "Optional: BCC recipients (comma-separated)"
+      },
+      {
+        "name": "subject",
+        "type": "string",
+        "desc": "Optional: Email subject"
+      },
+      {
+        "name": "body_text",
+        "type": "string",
+        "desc": "Optional: Plain text body"
+      },
+      {
+        "name": "body_html",
+        "type": "string",
+        "desc": "Optional: HTML body"
+      },
+      {
+        "name": "reply_to",
+        "type": "string",
+        "desc": "Optional: Reply-To header"
+      },
+      {
+        "name": "in_reply_to",
+        "type": "string",
+        "desc": "Optional: In-Reply-To header (for replies)"
+      }
+    ]
+  },
+  {
+    "name": "list_drafts",
+    "description": "List drafts stored in the email client's Drafts folder",
+    "arguments": [
+      {
+        "name": "account_name",
+        "type": "string",
+        "desc": "Account to list drafts from"
+      },
+      {
+        "name": "folder",
+        "type": "string",
+        "desc": "Optional: Drafts folder name (default: 'Drafts'; Gmail uses '[Gmail]/Drafts')"
+      }
+    ]
+  },
+  {
+    "name": "get_draft",
+    "description": "Retrieve the full contents of a draft by UID (from list_drafts)",
+    "arguments": [
+      {
+        "name": "account_name",
+        "type": "string",
+        "desc": "Account the draft belongs to"
+      },
+      {
+        "name": "folder",
+        "type": "string",
+        "desc": "Optional: Drafts folder name (default: 'Drafts'; Gmail uses '[Gmail]/Drafts')"
+      },
+      {
+        "name": "uid",
+        "type": "integer",
+        "desc": "Draft UID (from list_drafts)"
+      }
+    ]
+  },
+  {
+    "name": "send_draft",
+    "description": "Send an existing draft by UID and (by default) delete it from the Drafts folder",
+    "arguments": [
+      {
+        "name": "account_name",
+        "type": "string",
+        "desc": "Account to send the draft from"
+      },
+      {
+        "name": "folder",
+        "type": "string",
+        "desc": "Optional: Drafts folder name (default: 'Drafts'; Gmail uses '[Gmail]/Drafts')"
+      },
+      {
+        "name": "uid",
+        "type": "integer",
+        "desc": "Draft UID (from list_drafts)"
+      },
+      {
+        "name": "delete_after_send",
+        "type": "boolean",
+        "desc": "Optional: Delete the draft from the Drafts folder after sending (default: true)"
+      }
+    ]
+  },
+  {
+    "name": "delete_draft",
+    "description": "Permanently delete a draft by UID from the email client's Drafts folder",
+    "arguments": [
+      {
+        "name": "account_name",
+        "type": "string",
+        "desc": "Account the draft belongs to"
+      },
+      {
+        "name": "folder",
+        "type": "string",
+        "desc": "Optional: Drafts folder name (default: 'Drafts'; Gmail uses '[Gmail]/Drafts')"
+      },
+      {
+        "name": "uid",
+        "type": "integer",
+        "desc": "Draft UID (from list_drafts)"
+      }
+    ]
   }
 ]
 

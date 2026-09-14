@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
@@ -329,4 +330,138 @@ func (c *IMAPClient) readLiteralToBytes(literal imap.Literal) []byte {
 		}
 	}
 	return bodyBytes
+}
+
+// messageLiteral adapts a bytes.Reader to the imap.Literal interface so raw
+// message bytes can be passed to Append.
+type messageLiteral struct {
+	r *bytes.Reader
+}
+
+func (l messageLiteral) Read(p []byte) (int, error) { return l.r.Read(p) }
+func (l messageLiteral) Len() int                   { return l.r.Len() }
+
+// SaveDraft appends a raw RFC 2822 message to the drafts folder. The new draft
+// is flagged \Draft so email clients show it in their Drafts view.
+func (c *IMAPClient) SaveDraft(folder string, message []byte) error {
+	if err := c.Connect(); err != nil {
+		return err
+	}
+
+	if err := c.client.Append(folder, []string{imap.DraftFlag}, time.Now(), messageLiteral{r: bytes.NewReader(message)}); err != nil {
+		return fmt.Errorf("failed to append draft to %s: %w", folder, err)
+	}
+
+	c.logger.WithFields(logrus.Fields{
+		"account": c.config.Name,
+		"folder":  folder,
+	}).Info("Saved draft")
+	return nil
+}
+
+// FetchDrafts fetches all messages from the drafts folder, preserving each
+// message's UID so it can later be sent or deleted.
+func (c *IMAPClient) FetchDrafts(folder string) ([]*types.Email, error) {
+	if err := c.Connect(); err != nil {
+		return nil, err
+	}
+
+	mbox, err := c.client.Select(folder, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to select folder %s: %w", folder, err)
+	}
+
+	if mbox.Messages == 0 {
+		return []*types.Email{}, nil
+	}
+
+	seqSet := new(imap.SeqSet)
+	seqSet.AddRange(1, mbox.Messages)
+
+	items := []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchInternalDate, imap.FetchUid, imap.FetchRFC822}
+	messages := make(chan *imap.Message, 10)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.client.Fetch(seqSet, items, messages)
+	}()
+
+	var emails []*types.Email
+	for msg := range messages {
+		emails = append(emails, c.parseMessage(msg, folder))
+	}
+
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("failed to fetch drafts: %w", err)
+	}
+
+	return emails, nil
+}
+
+// FetchEmailByUID fetches a single message by UID from the given folder.
+func (c *IMAPClient) FetchEmailByUID(folder string, uid uint32) (*types.Email, error) {
+	if err := c.Connect(); err != nil {
+		return nil, err
+	}
+
+	if _, err := c.client.Select(folder, false); err != nil {
+		return nil, fmt.Errorf("failed to select folder %s: %w", folder, err)
+	}
+
+	seqSet := new(imap.SeqSet)
+	seqSet.AddNum(uid)
+
+	items := []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchInternalDate, imap.FetchUid, imap.FetchRFC822}
+	messages := make(chan *imap.Message, 10)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.client.UidFetch(seqSet, items, messages)
+	}()
+
+	for msg := range messages {
+		if msg.Uid == uid {
+			email := c.parseMessage(msg, folder)
+			if err := <-done; err != nil {
+				return nil, fmt.Errorf("failed to fetch draft: %w", err)
+			}
+			return email, nil
+		}
+	}
+
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("failed to fetch draft: %w", err)
+	}
+	return nil, fmt.Errorf("draft with UID %d not found in %s", uid, folder)
+}
+
+// DeleteEmailByUID marks a message as \Deleted and expunges it, permanently
+// removing it from the folder.
+func (c *IMAPClient) DeleteEmailByUID(folder string, uid uint32) error {
+	if err := c.Connect(); err != nil {
+		return err
+	}
+
+	if _, err := c.client.Select(folder, false); err != nil {
+		return fmt.Errorf("failed to select folder %s: %w", folder, err)
+	}
+
+	seqSet := new(imap.SeqSet)
+	seqSet.AddNum(uid)
+
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	if err := c.client.UidStore(seqSet, item, []interface{}{imap.DeletedFlag}, nil); err != nil {
+		return fmt.Errorf("failed to mark message as deleted: %w", err)
+	}
+
+	if err := c.client.Expunge(nil); err != nil {
+		return fmt.Errorf("failed to expunge message: %w", err)
+	}
+
+	c.logger.WithFields(logrus.Fields{
+		"account": c.config.Name,
+		"folder":  folder,
+		"uid":     uid,
+	}).Info("Deleted message")
+	return nil
 }
