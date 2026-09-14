@@ -131,6 +131,8 @@ Send a new email with support for text, HTML, attachments, CC, BCC.
 - `reply_to` (optional): Reply-To header
 - `in_reply_to` (optional): In-Reply-To header (for replies)
 
+Attachments accept **local file paths** (read from the machine running the server) and **http(s) URLs** (fetched with a 15s timeout). Limits: max 10 files, 10MB per file, 25MB total. MIME types are detected from the extension/content. Previously the `attachments` parameter was accepted but silently ignored — files are now actually attached.
+
 ### `create_draft`
 Create a draft email and store it in the email client's Drafts folder. The draft appears in your email client (Gmail, Outlook, etc.) exactly as if you had composed it there — it is **not** sent.
 
@@ -145,18 +147,19 @@ Create a draft email and store it in the email client's Drafts folder. The draft
 - `body_html` (optional): HTML body
 - `reply_to` (optional): Reply-To header
 - `in_reply_to` (optional): In-Reply-To header (for replies)
+- `attachments` (optional): Files to attach — local paths or http(s) URLs (max 10MB each, 10 files / 25MB total)
 
-*Requires at least one of `subject`, `body_text`, or `body_html`.*
+*Requires at least one of `subject`, `body_text`, `body_html`, or `attachments`.*
 
 ### `list_drafts`
-List drafts stored in the email client's Drafts folder. Returns each draft's UID (used to send/delete it), subject, recipients, and a body snippet.
+List drafts stored in the email client's Drafts folder. Returns each draft's UID (used to send/delete it), subject, recipients, a body snippet, plus `attachment_count` and an `attachments` array (`filename`, `mime_type`, `size`).
 
 **Parameters:**
 - `account_name` (required): Account to list drafts from
 - `folder` (optional): Drafts folder name (default: `Drafts`; Gmail uses `[Gmail]/Drafts`)
 
 ### `get_draft`
-Retrieve the full contents of a single draft by UID (from `list_drafts`), including the full plain-text and HTML body.
+Retrieve the full contents of a single draft by UID (from `list_drafts`), including the full plain-text and HTML body plus an `attachments` array (`filename`, `mime_type`, `size`).
 
 **Parameters:**
 - `account_name` (required): Account the draft belongs to
@@ -164,7 +167,7 @@ Retrieve the full contents of a single draft by UID (from `list_drafts`), includ
 - `folder` (optional): Drafts folder name (default: `Drafts`)
 
 ### `send_draft`
-Send an existing draft by UID and, by default, delete it from the Drafts folder afterward. This is how a user asks an agent to "send that draft I saved".
+Send an existing draft by UID and, by default, delete it from the Drafts folder afterward. This is how a user asks an agent to "send that draft I saved". The stored message bytes are sent as-is, so attachments survive the round trip.
 
 **Parameters:**
 - `account_name` (required): Account to send the draft from

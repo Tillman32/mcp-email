@@ -163,6 +163,21 @@ func (t *SendEmailTool) Execute(params map[string]interface{}) (interface{}, err
 		msg.InReplyTo = inReplyTo
 	}
 
+	// Parse attachments (optional): local file paths or http(s) URLs
+	if rawAtt, ok := params["attachments"]; ok {
+		sources, err := email.ParseAttachmentSources(rawAtt)
+		if err != nil {
+			return nil, err
+		}
+		if len(sources) > 0 {
+			attachments, err := email.LoadAttachments(sources)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load attachments: %w", err)
+			}
+			msg.Attachments = attachments
+		}
+	}
+
 	// Send email
 	if err := t.emailManager.SendEmail(accountName, msg); err != nil {
 		return nil, fmt.Errorf("failed to send email: %w", err)

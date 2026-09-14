@@ -88,6 +88,11 @@ func (t *CreateDraftTool) InputSchema() map[string]interface{} {
 				"type":        "string",
 				"description": "Optional: In-Reply-To header (for replies)",
 			},
+			"attachments": map[string]interface{}{
+				"type":        "array",
+				"items":       map[string]interface{}{"type": "string"},
+				"description": "Optional: files to attach (local paths or http(s) URLs, max 10MB each)",
+			},
 		},
 		"required": []string{"account_name"},
 	}
@@ -149,9 +154,27 @@ func (t *CreateDraftTool) Execute(params map[string]interface{}) (interface{}, e
 		msg.BodyHTML = bodyHTML
 	}
 
-	// Require at least a subject or a body so a blank draft isn't created
-	if msg.Subject == "" && msg.BodyText == "" && msg.BodyHTML == "" {
-		return nil, fmt.Errorf("at least one of subject, body_text, or body_html is required")
+	// Parse attachments (optional): local file paths or http(s) URLs.
+	// Parsed before the blank-draft guard so an attachments-only draft counts
+	// as content.
+	if rawAtt, ok := params["attachments"]; ok {
+		sources, err := email.ParseAttachmentSources(rawAtt)
+		if err != nil {
+			return nil, err
+		}
+		if len(sources) > 0 {
+			attachments, err := email.LoadAttachments(sources)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load attachments: %w", err)
+			}
+			msg.Attachments = attachments
+		}
+	}
+
+	// Require at least a subject, a body, or an attachment so a blank draft
+	// isn't created
+	if msg.Subject == "" && msg.BodyText == "" && msg.BodyHTML == "" && len(msg.Attachments) == 0 {
+		return nil, fmt.Errorf("at least one of subject, body_text, body_html, or attachments is required")
 	}
 
 	// Parse reply_to (optional)

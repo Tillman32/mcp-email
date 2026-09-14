@@ -3,8 +3,12 @@ package email
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/smtp"
+	"net/textproto"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -48,8 +52,19 @@ func NewSMTPClient(cfg *config.AccountConfig) (*SMTPClient, error) {
 
 // Send sends an email
 func (c *SMTPClient) Send(msg *EmailMessage) error {
-	// Create message
-	emailBytes := c.createMessage(msg)
+	recipients := append(append(msg.To, msg.Cc...), msg.Bcc...)
+	return c.deliver(recipients, c.createMessage(msg))
+}
+
+// SendRaw sends pre-built RFC 2822 message bytes (e.g. a draft fetched back
+// from the server, attachments included) to the given recipients.
+func (c *SMTPClient) SendRaw(recipients []string, raw []byte) error {
+	return c.deliver(recipients, raw)
+}
+
+// deliver transmits raw message bytes over SMTP, using implicit TLS on port
+// 465 and STARTTLS otherwise.
+func (c *SMTPClient) deliver(recipients []string, raw []byte) error {
 	// Connect to server
 	addr := fmt.Sprintf("%s:%d", c.config.SMTPHost, c.config.SMTPPort)
 
@@ -90,8 +105,7 @@ func (c *SMTPClient) Send(msg *EmailMessage) error {
 			return fmt.Errorf("failed to set sender: %w", mailErr)
 		}
 
-		// Set recipients
-		recipients := append(append(msg.To, msg.Cc...), msg.Bcc...)
+		// Set recipients (resolved by the caller)
 		for _, to := range recipients {
 			if rcptErr := client.Rcpt(to); rcptErr != nil {
 				return fmt.Errorf("failed to set recipient %s: %w", to, rcptErr)
@@ -104,7 +118,7 @@ func (c *SMTPClient) Send(msg *EmailMessage) error {
 			return fmt.Errorf("failed to send data command: %w", dataErr)
 		}
 
-		if _, writeErr := w.Write(emailBytes); writeErr != nil {
+		if _, writeErr := w.Write(raw); writeErr != nil {
 			return fmt.Errorf("failed to write message: %w", writeErr)
 		}
 
@@ -141,8 +155,7 @@ func (c *SMTPClient) Send(msg *EmailMessage) error {
 			return fmt.Errorf("failed to set sender: %w", mailErr)
 		}
 
-		// Set recipients
-		recipients := append(append(msg.To, msg.Cc...), msg.Bcc...)
+		// Set recipients (resolved by the caller)
 		for _, to := range recipients {
 			if rcptErr := client.Rcpt(to); rcptErr != nil {
 				return fmt.Errorf("failed to set recipient %s: %w", to, rcptErr)
@@ -155,7 +168,7 @@ func (c *SMTPClient) Send(msg *EmailMessage) error {
 			return fmt.Errorf("failed to send data command: %w", dataErr)
 		}
 
-		if _, writeErr := w.Write(emailBytes); writeErr != nil {
+		if _, writeErr := w.Write(raw); writeErr != nil {
 			return fmt.Errorf("failed to write message: %w", writeErr)
 		}
 
@@ -167,7 +180,9 @@ func (c *SMTPClient) Send(msg *EmailMessage) error {
 	}
 }
 
-// createMessage creates an email message in MIME format
+// createMessage creates an email message in MIME format. Messages without
+// attachments keep the existing simple single-part layout; messages with
+// attachments use multipart/mixed with base64-encoded file parts.
 func (c *SMTPClient) createMessage(msg *EmailMessage) []byte {
 	var buf bytes.Buffer
 
@@ -185,18 +200,89 @@ func (c *SMTPClient) createMessage(msg *EmailMessage) []byte {
 		buf.WriteString(fmt.Sprintf("In-Reply-To: %s\r\n", msg.InReplyTo))
 	}
 
-	// Set content type
+	bodyContentType := "text/plain; charset=utf-8"
+	body := msg.BodyText
 	if msg.BodyHTML != "" {
-		buf.WriteString("Content-Type: text/html; charset=utf-8\r\n")
-		buf.WriteString("\r\n")
-		buf.WriteString(msg.BodyHTML)
-	} else {
-		buf.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-		buf.WriteString("\r\n")
-		buf.WriteString(msg.BodyText)
+		bodyContentType = "text/html; charset=utf-8"
+		body = msg.BodyHTML
 	}
 
+	if len(msg.Attachments) == 0 {
+		buf.WriteString(fmt.Sprintf("Content-Type: %s\r\n", bodyContentType))
+		buf.WriteString("\r\n")
+		buf.WriteString(body)
+		return buf.Bytes()
+	}
+
+	buf.WriteString("MIME-Version: 1.0\r\n")
+	mw := multipart.NewWriter(&buf)
+	buf.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=%s\r\n", mw.Boundary()))
+	buf.WriteString("\r\n")
+
+	// Body part first
+	bodyHeader := textproto.MIMEHeader{}
+	bodyHeader.Set("Content-Type", bodyContentType)
+	bodyHeader.Set("Content-Transfer-Encoding", "8bit")
+	bodyPart, err := mw.CreatePart(bodyHeader)
+	if err == nil {
+		if _, err := io.WriteString(bodyPart, body); err != nil {
+			c.logger.WithError(err).Warn("Failed to write email body part")
+		}
+	}
+
+	// One base64 part per attachment
+	for _, att := range msg.Attachments {
+		name := sanitizeFilename(att.Filename)
+		mimeType := att.MimeType
+		if mimeType == "" {
+			mimeType = defaultMimeType
+		}
+		h := textproto.MIMEHeader{}
+		h.Set("Content-Type", fmt.Sprintf("%s; name=\"%s\"", mimeType, name))
+		h.Set("Content-Transfer-Encoding", "base64")
+		h.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", name))
+		part, err := mw.CreatePart(h)
+		if err != nil {
+			continue
+		}
+		if err := writeBase64Lines(part, att.Content); err != nil {
+			continue
+		}
+	}
+
+	_ = mw.Close()
 	return buf.Bytes()
+}
+
+// sanitizeFilename strips path separators and characters that would break a
+// MIME header parameter value.
+func sanitizeFilename(name string) string {
+	name = strings.ReplaceAll(name, `"`, "'")
+	name = strings.ReplaceAll(name, "\r", "")
+	name = strings.ReplaceAll(name, "\n", "")
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." {
+		return defaultAttachmentName
+	}
+	return name
+}
+
+// writeBase64Lines writes base64 with 76-char CRLF line breaks per RFC 2045.
+func writeBase64Lines(w io.Writer, content []byte) error {
+	const lineLen = 76
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(content)))
+	base64.StdEncoding.Encode(encoded, content)
+	for len(encoded) > 0 {
+		n := min(len(encoded), lineLen)
+		if _, err := w.Write(encoded[:n]); err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte("\r\n")); err != nil {
+			return err
+		}
+		encoded = encoded[n:]
+	}
+	return nil
 }
 
 // BuildMessage returns the raw RFC 2822 message bytes for a message without

@@ -101,6 +101,7 @@ func (t *GetDraftTool) Execute(params map[string]interface{}) (interface{}, erro
 		"date":         draft.Date.Format(time.RFC3339),
 		"body_text":    draft.BodyText,
 		"body_html":    draft.BodyHTML,
+		"attachments":  draft.Attachments,
 		"folder_path":  draft.FolderPath,
 	}, nil
 }

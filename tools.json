@@ -186,6 +186,11 @@
         "name": "in_reply_to",
         "type": "string",
         "desc": "Optional: In-Reply-To header (for replies)"
+      },
+      {
+        "name": "attachments",
+        "type": "array",
+        "desc": "Optional: files to attach (local paths or http(s) URLs, max 10MB each)"
       }
     ]
   },
